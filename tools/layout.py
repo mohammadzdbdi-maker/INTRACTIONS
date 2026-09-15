@@ -16,26 +16,44 @@ M = 24.0                 # حاشیه
 CW = W - 2 * M           # عرض ناحیه محتوا
 
 # پالت رنگی
-NAVY = colors.HexColor('#0E4C6B')
-TEAL = colors.HexColor('#0F7A8A')
-BLUE = colors.HexColor('#1F6FB2')
-INK = colors.HexColor('#1C2B33')
-GRAY = colors.HexColor('#5A6B73')
-LIGHT = colors.HexColor('#EEF4F7')
-LINE = colors.HexColor('#CBD9E0')
+# پالت خاکستری — مناسب چاپ سیاه‌وسفید
+NAVY = colors.HexColor('#262626')
+TEAL = colors.HexColor('#4A4A4A')
+BLUE = colors.HexColor('#3D3D3D')
+INK = colors.HexColor('#171717')
+GRAY = colors.HexColor('#5C5C5C')
+LIGHT = colors.HexColor('#F4F4F4')
+LINE = colors.HexColor('#ADADAD')
 WHITE = colors.white
-RED = colors.HexColor('#C0392B')
-ORANGE = colors.HexColor('#D97706')
-AMBER = colors.HexColor('#B8860B')
-GREEN = colors.HexColor('#1E8449')
-PURPLE = colors.HexColor('#6C3F9E')
+RED = colors.HexColor('#1A1A1A')
+ORANGE = colors.HexColor('#3A3A3A')
+AMBER = colors.HexColor('#5A5A5A')
+GREEN = colors.HexColor('#454545')
+PURPLE = colors.HexColor('#333333')
+HEAD_BG = colors.HexColor('#E3E3E3')
 
 SEV = {
-    'X': (RED, 'منع مصرف'),
-    'D': (ORANGE, 'عمده'),
-    'C': (AMBER, 'متوسط'),
-    'B': (GREEN, 'خفیف'),
+    'X': (colors.HexColor('#000000'), 'منع مصرف'),
+    'D': (colors.HexColor('#454545'), 'عمده'),
+    'C': (colors.HexColor('#7A7A7A'), 'متوسط'),
+    'B': (colors.HexColor('#A5A5A5'), 'خفیف'),
 }
+
+
+def sev_chip(c, cx, cy, code, r=7.2):
+    """نشانگر شدت تداخل — خوانا در چاپ سیاه‌وسفید."""
+    col = SEV.get(code, (GRAY, ''))[0]
+    if code in ('C', 'B'):
+        c.setFillColor(WHITE)
+        c.setStrokeColor(INK if code == 'C' else GRAY)
+        c.setLineWidth(1.0)
+        c.circle(cx, cy, r, stroke=1, fill=1)
+        set_font(c, 8.4, INK if code == 'C' else GRAY, True)
+    else:
+        c.setFillColor(col)
+        c.circle(cx, cy, r, stroke=0, fill=1)
+        set_font(c, 8.4, WHITE, True)
+    c.drawCentredString(cx, cy - 3.1, code)
 
 
 def fa(s):
@@ -185,11 +203,11 @@ def card(c, x, y, wd, title, lines, accent=TEAL, size=8.6, fill=WHITE,
 
 def callout(c, x, y, wd, title, text, kind='info', size=8.6, lead=None):
     """کادر هشدار/نکته با نوار عمودی رنگی در سمت راست."""
-    pal = {'warn': (RED, colors.HexColor('#FDECEA')),
-           'info': (BLUE, colors.HexColor('#EAF3FB')),
-           'ok': (GREEN, colors.HexColor('#E9F6EE')),
-           'note': (AMBER, colors.HexColor('#FDF5E3'))}[kind]
-    accent, bg = pal
+    pal = {'warn': (colors.HexColor('#000000'), colors.HexColor('#EDEDED'), 7),
+           'info': (colors.HexColor('#5A5A5A'), colors.HexColor('#F6F6F6'), 4),
+           'ok': (colors.HexColor('#3A3A3A'), colors.HexColor('#F4F4F4'), 4),
+           'note': (colors.HexColor('#4A4A4A'), colors.HexColor('#F5F5F5'), 4)}[kind]
+    accent, bg, bar_w = pal
     if lead is None:
         lead = size * 1.6
     pad = 8
@@ -200,8 +218,11 @@ def callout(c, x, y, wd, title, text, kind='info', size=8.6, lead=None):
     h = pad * 2 + (title_size := 10.2) + 4 + len(lines) * lead
     c.setFillColor(bg)
     c.roundRect(x, y - h, wd, h, 4, stroke=0, fill=1)
+    c.setStrokeColor(LINE)
+    c.setLineWidth(0.7)
+    c.roundRect(x, y - h, wd, h, 4, stroke=1, fill=0)
     c.setFillColor(accent)
-    c.rect(x + wd - 4, y - h, 4, h, stroke=0, fill=1)
+    c.rect(x + wd - bar_w, y - h, bar_w, h, stroke=0, fill=1)
     draw_line(c, title, x + pad, y - pad - title_size, title_size, accent, True,
               inner)
     yy = y - pad - title_size - 6
@@ -212,8 +233,8 @@ def callout(c, x, y, wd, title, text, kind='info', size=8.6, lead=None):
 
 
 def table(c, x, y, colw, rows, header=None, fs=8.3, lead=10.9, pad=5,
-          sev=None, header_bg=NAVY, zebra=LIGHT, grid=LINE, min_h=17,
-          center_cols=(), row_colors=None):
+          sev=None, header_bg=HEAD_BG, header_fg=INK, zebra=LIGHT, grid=LINE,
+          min_h=17, center_cols=(), row_colors=None):
     """جدول راست‌چین؛ colw از راست به چپ. y پایین‌ترین نقطه را برمی‌گرداند."""
     total = sum(colw)
     ncol = len(colw)
@@ -236,10 +257,10 @@ def table(c, x, y, colw, rows, header=None, fs=8.3, lead=10.9, pad=5,
             ty = yy - pad - fs
             for ln in lines:
                 if i in center_cols:
-                    draw_line(c, ln, cell_right(i) - colw[i], ty, fs, WHITE, True,
+                    draw_line(c, ln, cell_right(i) - colw[i], ty, fs, header_fg, True,
                               colw[i], 'center')
                 else:
-                    draw_line(c, ln, cell_right(i) - colw[i], ty, fs, WHITE, True,
+                    draw_line(c, ln, cell_right(i) - colw[i], ty, fs, header_fg, True,
                               colw[i] - pad)
                 ty -= (lead + 1)
         yy -= hh
@@ -263,14 +284,7 @@ def table(c, x, y, colw, rows, header=None, fs=8.3, lead=10.9, pad=5,
                               colw[i] - pad)
                 ty -= lead
         if sev is not None:
-            code = row[sev]
-            col = SEV.get(code, (GRAY, ''))[0]
-            cx = x + total - 9
-            cy = yy - rh / 2.0
-            c.setFillColor(col)
-            c.circle(cx, cy, 7.2, stroke=0, fill=1)
-            set_font(c, 8.4, WHITE, True)
-            c.drawCentredString(cx, cy - 3.1, code)
+            sev_chip(c, x + total - 9, yy - rh / 2.0, row[sev])
         yy -= rh
     c.setStrokeColor(grid)
     c.setLineWidth(0.6)
@@ -293,7 +307,7 @@ def table_h(colw, rows, header=None, fs=8.3, lead=10.9, pad=5, min_h=17):
     return total_h
 
 
-def hbars(c, x, y, wd, data, title=None, color=TEAL, fs=8.6, bar_h=15, gap=8,
+def hbars(c, x, y, wd, data, title=None, color=colors.HexColor('#4A4A4A'), fs=8.6, bar_h=15, gap=8,
           maxv=None, unit='٪'):
     """نمودار میله‌ای افقی راست‌به‌چپ."""
     yy = y
@@ -311,7 +325,7 @@ def hbars(c, x, y, wd, data, title=None, color=TEAL, fs=8.6, bar_h=15, gap=8,
         col = color if len(rest) < 1 else rest[0]
         bl = max(3, bar_area * (v / mx))
         bx = x + label_w + 10
-        c.setFillColor(colors.HexColor('#E7EEF2'))
+        c.setFillColor(colors.HexColor('#E8E8E8'))
         c.roundRect(bx, yy - bar_h, bar_area, bar_h, 3, stroke=0, fill=1)
         c.setFillColor(col)
         c.roundRect(bx + bar_area - bl, yy - bar_h, bl, bar_h, 3, stroke=0, fill=1)
@@ -326,15 +340,10 @@ def hbars(c, x, y, wd, data, title=None, color=TEAL, fs=8.6, bar_h=15, gap=8,
 def stat_box(c, x, y, wd, value, label, sub='', accent=TEAL, h=62):
     c.setFillColor(WHITE)
     c.setStrokeColor(LINE)
-    c.setLineWidth(0.6)
+    c.setLineWidth(0.8)
     c.roundRect(x, y - h, wd, h, 5, stroke=1, fill=1)
     c.setFillColor(accent)
-    c.roundRect(x, y - h, 4.5, h, 2.2, stroke=0, fill=1)
-    c.setFillColor(accent)
-    c.setFillColor(colors.HexColor('#F3F8FA'))
-    c.roundRect(x, y - h, wd, h, 5, stroke=0, fill=1)
-    c.setFillColor(accent)
-    c.roundRect(x, y - h, 4.5, h, 2.2, stroke=0, fill=1)
+    c.roundRect(x, y - h, 6, h, 3, stroke=0, fill=1)
     draw_line(c, value, x + 10, y - 26, 20, accent, True, wd - 18)
     draw_line(c, label, x + 10, y - 42, 8.4, INK, False, wd - 18)
     if sub:
@@ -342,7 +351,7 @@ def stat_box(c, x, y, wd, value, label, sub='', accent=TEAL, h=62):
     return y - h
 
 
-def chips(c, x, y, wd, items, fs=8.2, pad=6, gap=5, bg=LIGHT, fg=NAVY):
+def chips(c, x, y, wd, items, fs=8.2, pad=6, gap=5, bg=colors.HexColor('#EFEFEF'), fg=INK):
     """ردیفی از برچسب‌های کپسولی."""
     cx = x + wd
     cy = y
@@ -352,7 +361,9 @@ def chips(c, x, y, wd, items, fs=8.2, pad=6, gap=5, bg=LIGHT, fg=NAVY):
             cx = x + wd
             cy -= (fs * 1.6 + gap)
         c.setFillColor(bg)
-        c.roundRect(cx - tw, cy - fs * 1.45, tw, fs * 1.45, 4, stroke=0, fill=1)
+        c.setStrokeColor(LINE)
+        c.setLineWidth(0.6)
+        c.roundRect(cx - tw, cy - fs * 1.45, tw, fs * 1.45, 4, stroke=1, fill=1)
         draw_line(c, it, cx - tw, cy - fs * 1.15, fs, fg, False, tw, 'center')
         cx -= (tw + gap)
     return cy - fs * 1.45

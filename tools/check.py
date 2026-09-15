@@ -1,5 +1,5 @@
 import pymupdf
-d = pymupdf.open('بروشور-تداخلات-دارویی-کودکان.pdf')
+d = pymupdf.open('بروشور-تداخلات-دارویی.pdf')
 W, H = d[0].rect.width, d[0].rect.height
 M = 24
 bad = 0
