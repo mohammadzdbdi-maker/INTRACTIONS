@@ -164,6 +164,55 @@
     persist(); PS.running = false; PS.report();
     console.log('تمام. برای دانلود نتایج: __psExport()');
   };
+  // ---------- حالت رابط کاربری: سرچ واقعی سایت در iframe نامرئی ----------
+  PS.uiDelayMs = PS.uiDelayMs || 600;
+  PS.debugCount = 0;
+  function uiSearchOne(kw) {
+    return new Promise(resolve => {
+      const f = document.createElement('iframe');
+      f.style.cssText = 'position:fixed;right:-2000px;width:10px;height:10px;opacity:0;border:0';
+      let settled = false;
+      const to = setTimeout(() => finish({ kw, found: null, error: 'timeout' }), 25000);
+      function finish(rec) {
+        if (settled) return; settled = true;
+        clearTimeout(to); try { f.remove(); } catch (e) {}
+        resolve(rec);
+      }
+      f.onload = () => setTimeout(() => {
+        try {
+          const doc = f.contentDocument;
+          const txt = (doc && doc.body && doc.body.innerText) || '';
+          const pk = kw.replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+          const cards = (txt.match(/کد ژنریک/g) || []).length;
+          const found = txt.includes(pk) && cards > 0;
+          const names = Array.from(doc.querySelectorAll('a'))
+            .map(a => (a.innerText || '').trim()).filter(t => t.length > 8).slice(0, 3);
+          if (PS.debugCount < 2) { PS.debugCount++; console.log('نمونه متن صفحه سرچ:', txt.slice(0, 250).replace(/\n/g, ' | ')); }
+          finish({ kw, found, n: cards, names, via: 'ui' });
+        } catch (e) { finish({ kw, found: null, error: String(e) }); }
+      }, 1500);
+      f.src = '/search?keyword=' + encodeURIComponent(kw);
+      document.body.appendChild(f);
+    });
+  }
+  PS.runUI = async function (limit) {
+    if (PS.running) { console.warn('در حال اجراست...'); return; }
+    PS.running = true; PS.stop = false;
+    for (const c of Object.keys(PS.results)) if (PS.results[c].found == null) delete PS.results[c];
+    const todo = CODES.filter(c => !PS.results[c]);
+    const n = Math.min(limit || todo.length, todo.length);
+    console.log(`شروع جستجو از رابط کاربری سایت: ${n} کد (مانده کل: ${todo.length})`);
+    let done = 0;
+    for (const code of todo.slice(0, n)) {
+      if (PS.stop) break;
+      PS.results[code] = await uiSearchOne(pad(code));
+      done++;
+      if (done % 10 === 0) { persist(); PS.report(); }
+      await sleep(PS.uiDelayMs);
+    }
+    persist(); PS.running = false; PS.report();
+    console.log('تمام. برای دانلود نتایج: __psExport()');
+  };
   PS.stopRun = () => { PS.stop = true; };
   function absorb(k, v, verbose) {
     let o = null;
@@ -222,10 +271,11 @@
   };
   PS.reset = () => { PS.results = {}; persist(); console.log('نتایج پاک شد'); };
 
-  globalThis.__psRun = PS.run; globalThis.__psStop = PS.stopRun;
+  globalThis.__psRun = PS.run; globalThis.__psRunUI = PS.runUI; globalThis.__psStop = PS.stopRun;
   globalThis.__psStatus = PS.report; globalThis.__psCaptcha = PS.showCaptcha; globalThis.__psExport = PS.export; globalThis.__psReset = PS.reset;
   console.log('%cاسکریپت جستجوی پیام آماده است — ' + CODES.length + ' کد',
               'color:#06c;font-weight:bold;font-size:13px');
-  console.log('1) یک سرچ دستی در سایت انجام دهید تا کپچا ثبت شود  2) __psRun()  3) __psExport()');
+  console.log('حالت پیشنهادی: __psRunUI()  (سرچ واقعی سایت در iframe — بدون مسئله کپچا)');
+  console.log('حالت API: یک سرچ دستی برای کپچا، سپس __psRun()   |   خروجی: __psExport()');
   PS.report();
 })();
