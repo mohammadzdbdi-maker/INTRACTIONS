@@ -215,9 +215,13 @@
               const fa2en = x => x.replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
               const m = ptxt.match(/کد پیام\s*[:：]?\s*([\d۰-۹][\d۰-۹]*)/);
               const payam = m ? fa2en(m[1]).replace(/\D/g, '') : null;
-              const h = pd.querySelector('h1') || pd.querySelector('h2');
-              let name = h ? (h.innerText || '').trim().split('\n')[0] : '';
-              if (!name) name = (pd.title || '').split('|')[0].trim();
+              const nfa = (pd.querySelector('.name-fa') || {}).innerText || '';
+              const nen = (pd.querySelector('.name-en') || {}).innerText || '';
+              let name = [nfa.trim(), nen.trim()].filter(Boolean).join(' | ');
+              if (!name) {
+                const h = pd.querySelector('h1') || pd.querySelector('h2');
+                name = h ? (h.innerText || '').trim().split('\n')[0] : (pd.title || '').split('|')[0].trim();
+              }
               let url = ''; try { url = pd.location.href; } catch (e) {}
               fin2({ payamCode: payam, name, url });
             } catch (e) { fin2({ error: String(e) }); }
@@ -245,7 +249,9 @@
     PS.running = true; PS.stop = false;
     for (const c of Object.keys(PS.results)) {
       const r = PS.results[c];
-      if (r.found == null || (r.found === true && r.via === 'ui' && !r.payamCode)) delete PS.results[c];
+      if (r.found == null ||
+          (r.found === true && r.via === 'ui' &&
+           (!r.payamCode || !r.name || /سامانه پیام داروساز/.test(r.name)))) delete PS.results[c];
     }
     const todo = CODES.filter(c => !PS.results[c]);
     const n = Math.min(limit || todo.length, todo.length);
@@ -303,8 +309,9 @@
   PS.export = function () {
     const rows = CODES.filter(c => PS.results[c]).map(c => {
       const r = PS.results[c];
+      const pc = r.payamCode ? '="' + r.payamCode + '"' : '';
       return [c, r.kw, r.found === true ? 'بله' : (r.found === false ? 'خیر' : 'خطا'),
-              r.n ?? '', r.payamCode || '', r.name || '', r.error || ''];
+              r.n ?? '', pc, r.name || '', r.error || ''];
     });
     const head = ['کد ژنریک', 'کد جستجو', 'پیدا شد در پیام', 'تعداد نتایج', 'کد پیام', 'نام محصول در پیام', 'خطا'];
     const csv = '\uFEFF' + [head, ...rows].map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
