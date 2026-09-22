@@ -184,6 +184,9 @@
           const txt = (doc && doc.body && doc.body.innerText) || '';
           const pk = kw.replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
           const cards = (txt.match(/کد ژنریک/g) || []).length;
+          if (!cards && /آروان|arvan|challenge|دسترسی شما مسدود|captcha/i.test(txt)) {
+            finish({ kw, found: null, error: 'waf' }); return;
+          }
           const found = txt.includes(pk) && cards > 0;
           if (PS.debugCount < 2) { PS.debugCount++; console.log('نمونه متن صفحه سرچ:', txt.slice(0, 250).replace(/\n/g, ' | ')); }
           if (!found) { finish({ kw, found, n: cards, via: 'ui' }); return; }
@@ -256,10 +259,17 @@
     const todo = CODES.filter(c => !PS.results[c]);
     const n = Math.min(limit || todo.length, todo.length);
     console.log(`شروع جستجو از رابط کاربری سایت: ${n} کد (مانده کل: ${todo.length})`);
-    let done = 0;
+    let done = 0, consec = 0;
     for (const code of todo.slice(0, n)) {
       if (PS.stop) break;
-      PS.results[code] = await uiSearchOne(pad(code));
+      const rec = await uiSearchOne(pad(code));
+      PS.results[code] = rec;
+      consec = rec.found == null ? consec + 1 : 0;
+      if (consec >= 5) {
+        console.error('%c✘ ۵ خطای پشت‌سرهم (احتمالاً چالش ضدربات). چند دقیقه صبر کنید و دوباره __psRunUI() بزنید — از همین‌جا ادامه می‌دهد.',
+                      'color:#c00;font-weight:bold');
+        PS.stop = true;
+      }
       done++;
       if (done % 10 === 0) { persist(); PS.report(); }
       await sleep(PS.uiDelayMs);
