@@ -185,10 +185,39 @@
           const pk = kw.replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
           const cards = (txt.match(/کد ژنریک/g) || []).length;
           const found = txt.includes(pk) && cards > 0;
-          const names = Array.from(doc.querySelectorAll('a'))
-            .map(a => (a.innerText || '').trim()).filter(t => t.length > 8).slice(0, 3);
           if (PS.debugCount < 2) { PS.debugCount++; console.log('نمونه متن صفحه سرچ:', txt.slice(0, 250).replace(/\n/g, ' | ')); }
-          finish({ kw, found, n: cards, names, via: 'ui' });
+          if (!found) { finish({ kw, found, n: cards, via: 'ui' }); return; }
+          // کوچک‌ترین بلوکی که کد را دارد = کارت اولین محصول؛ لینک داخلش = صفحه محصول
+          const blocks = Array.from(doc.querySelectorAll('*'))
+            .filter(el => el.children.length < 40 && (el.innerText || '').includes(pk) && (el.innerText || '').length < 900)
+            .sort((a, b) => a.innerText.length - b.innerText.length);
+          const anchor = blocks.length ? blocks[0].querySelector('a[href]') : null;
+          if (!anchor) { finish({ kw, found, n: cards, via: 'ui', error: 'no-link' }); return; }
+          const url = anchor.href;
+          const p = document.createElement('iframe');
+          p.style.cssText = 'position:fixed;right:-2000px;width:10px;height:10px;opacity:0;border:0';
+          let done2 = false;
+          const to2 = setTimeout(() => fin2({}), 25000);
+          function fin2(extra) {
+            if (done2) return; done2 = true;
+            clearTimeout(to2); try { p.remove(); } catch (e) {}
+            finish(Object.assign({ kw, found, n: cards, via: 'ui', url }, extra));
+          }
+          p.onload = () => setTimeout(() => {
+            try {
+              const pd = p.contentDocument;
+              const ptxt = (pd && pd.body && pd.body.innerText) || '';
+              const fa2en = x => x.replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+              const m = ptxt.match(/کد پیام\s*[:：]?\s*([\d۰-۹][\d۰-۹]*)/);
+              const payam = m ? fa2en(m[1]).replace(/\D/g, '') : null;
+              const h = pd.querySelector('h1') || pd.querySelector('h2');
+              let name = h ? (h.innerText || '').trim().split('\n')[0] : '';
+              if (!name) name = (pd.title || '').split('|')[0].trim();
+              fin2({ payamCode: payam, name });
+            } catch (e) { fin2({ error: String(e) }); }
+          }, 1500);
+          p.src = url;
+          doc.body.appendChild(p);
         } catch (e) { finish({ kw, found: null, error: String(e) }); }
       }, 1500);
       f.src = '/search?keyword=' + encodeURIComponent(kw);
@@ -198,7 +227,10 @@
   PS.runUI = async function (limit) {
     if (PS.running) { console.warn('در حال اجراست...'); return; }
     PS.running = true; PS.stop = false;
-    for (const c of Object.keys(PS.results)) if (PS.results[c].found == null) delete PS.results[c];
+    for (const c of Object.keys(PS.results)) {
+      const r = PS.results[c];
+      if (r.found == null || (r.found === true && r.via === 'ui' && !r.payamCode)) delete PS.results[c];
+    }
     const todo = CODES.filter(c => !PS.results[c]);
     const n = Math.min(limit || todo.length, todo.length);
     console.log(`شروع جستجو از رابط کاربری سایت: ${n} کد (مانده کل: ${todo.length})`);
@@ -256,9 +288,9 @@
     const rows = CODES.filter(c => PS.results[c]).map(c => {
       const r = PS.results[c];
       return [c, r.kw, r.found === true ? 'بله' : (r.found === false ? 'خیر' : 'خطا'),
-              r.n ?? '', (r.ids || []).join(' | '), (r.names || []).join(' | '), r.error || ''];
+              r.n ?? '', r.payamCode || '', r.name || '', r.error || ''];
     });
-    const head = ['کد ژنریک', 'کد جستجو', 'پیدا شد در پیام', 'تعداد نتایج', 'شناسه‌های محصول پیام', 'نام‌های محصول پیام', 'خطا'];
+    const head = ['کد ژنریک', 'کد جستجو', 'پیدا شد در پیام', 'تعداد نتایج', 'کد پیام', 'نام محصول در پیام', 'خطا'];
     const csv = '\uFEFF' + [head, ...rows].map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
     const dl = (name, mime, data) => {
       const a = document.createElement('a');
