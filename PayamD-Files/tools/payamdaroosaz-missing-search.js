@@ -24,7 +24,7 @@
   PS.running = false;
   PS.stop = false;
   PS.delayMs = PS.delayMs || 800;
-  PS.pageSize = PS.pageSize || 50;
+  PS.pageSize = PS.pageSize || 10;
 
   // ---------- بازیابی نتایج قبلی ----------
   try {
@@ -103,8 +103,12 @@
       const url = '/api/v3/frontOffice/products?keyword=' + encodeURIComponent(kw) +
                   '&page=' + page + '&pageSize=' + PS.pageSize;
       const res = await fetch(url, { headers, credentials: 'same-origin' });
-      if (res.status === 401 || res.status === 403) throw { captcha: true, status: res.status };
-      if (!res.ok) throw { status: res.status };
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const capish = res.status === 401 || res.status === 403 ||
+                       /captcha|کپچا|امنیتی/i.test(body);
+        throw { captcha: capish, status: res.status, body: body.slice(0, 200) };
+      }
       const j = await res.json().catch(() => null);
       const arr = findArray(j);
       total = findTotal(j, arr);
@@ -118,6 +122,9 @@
   PS.run = async function (limit) {
     if (PS.running) { console.warn('در حال اجراست...'); return; }
     PS.running = true; PS.stop = false;
+    for (const c of Object.keys(PS.results))          // خطاهای قبلی دوباره تلاش شوند
+      if (PS.results[c].found == null) delete PS.results[c];
+    PS.scanStorage();
     const todo = CODES.filter(c => !PS.results[c]);
     const n = Math.min(limit || todo.length, todo.length);
     console.log(`شروع جستجو: ${n} کد (مانده کل: ${todo.length}) — تأخیر ${PS.delayMs}ms`);
@@ -135,12 +142,18 @@
         if (hits.length) found++;
       } catch (e) {
         if (e && e.captcha) {
-          console.error('%c✘ سرچ به کپچا خورد؛ یک بار دستی در سایت سرچ کنید تا توکن ثبت شود، سپس __psRun() را دوباره بزنید.',
+          console.error('%c✘ سرچ رد شد (مسئله کپچا). الان یک بار دستی در خود سایت سرچ کنید تا توکن ثبت شود، سپس __psRun() را دوباره بزنید.',
                         'color:#c00;font-weight:bold');
+          if (e.body) console.error('متن خطای سرور:', e.body);
           PS.stop = true;
         } else {
-          PS.results[code] = { kw, found: null, error: (e && e.status) || String(e) };
-          console.warn('خطا برای کد', code, e);
+          PS.results[code] = { kw, found: null, error: (e && e.status) || String(e), body: e && e.body };
+          console.warn('خطا برای کد', code, e && e.status, e && e.body);
+          if (!PS.captcha.token) {
+            console.error('%c✘ توکن کپچا ثبت نشده؛ یک سرچ دستی در سایت انجام دهید سپس __psRun()',
+                          'color:#c00;font-weight:bold');
+            PS.stop = true;
+          }
         }
       }
       done++;
@@ -151,6 +164,22 @@
     console.log('تمام. برای دانلود نتایج: __psExport()');
   };
   PS.stopRun = () => { PS.stop = true; };
+  PS.scanStorage = function () {
+    try {
+      for (const st of [localStorage, sessionStorage]) {
+        for (let i = 0; i < st.length; i++) {
+          const k = st.key(i), v = st.getItem(k) || '';
+          if (/captcha/i.test(k)) {
+            if (/token/i.test(k) && v.length > 20) PS.captcha.token = v;
+            else if (/enter|answer|user/i.test(k)) PS.captcha.enter = v;
+            console.log('کپچا از storage:', k, '=', v.slice(0, 40));
+          }
+        }
+      }
+    } catch (e) {}
+    return PS.captcha;
+  };
+  PS.showCaptcha = () => (console.log('کپچای فعلی:', PS.captcha), PS.captcha);
   PS.report = function () {
     const all = Object.values(PS.results);
     const f = all.filter(r => r.found === true).length;
@@ -181,7 +210,7 @@
   PS.reset = () => { PS.results = {}; persist(); console.log('نتایج پاک شد'); };
 
   globalThis.__psRun = PS.run; globalThis.__psStop = PS.stopRun;
-  globalThis.__psStatus = PS.report; globalThis.__psExport = PS.export; globalThis.__psReset = PS.reset;
+  globalThis.__psStatus = PS.report; globalThis.__psCaptcha = PS.showCaptcha; globalThis.__psExport = PS.export; globalThis.__psReset = PS.reset;
   console.log('%cاسکریپت جستجوی پیام آماده است — ' + CODES.length + ' کد',
               'color:#06c;font-weight:bold;font-size:13px');
   console.log('1) یک سرچ دستی در سایت انجام دهید تا کپچا ثبت شود  2) __psRun()  3) __psExport()');
