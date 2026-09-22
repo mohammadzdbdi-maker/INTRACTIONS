@@ -228,9 +228,8 @@
               const pd = p.contentDocument;
               const cur = pd.location.pathname + pd.location.hash;
               const ptxt = (pd.body && pd.body.innerText) || '';
-              if (cur !== baseLoc || /کد پیام/.test(ptxt)) {
-                if (/کد پیام/.test(ptxt) || polls > 2) { setTimeout(parseProduct, 800); return; }
-              }
+              if (/کد پیام/.test(ptxt)) { setTimeout(parseProduct, 800); return; }
+              if (cur !== baseLoc) { setTimeout(parseProduct, 2500); return; }
             } catch (e) {}
             if (polls < 40) setTimeout(poll, 400); else fin2({ error: 'no-nav' });
           })();
