@@ -250,7 +250,7 @@
     var csv = '\uFEFF' + rows.map(function (r) {
       return r.map(function (c) {
         c = (c == null ? '' : String(c));
-        if (/^[="\r\n,]/.test(c) && !/^=".*"$/.test(c)) c = '"' + c.replace(/"/g, '""') + '"';
+        if (!/^=".*"$/.test(c) && /[",\r\n]/.test(c)) c = '"' + c.replace(/"/g, '""') + '"';
         return c;
       }).join(',');
     }).join('\r\n');
