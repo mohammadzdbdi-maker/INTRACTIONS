@@ -187,23 +187,28 @@
           const found = txt.includes(pk) && cards > 0;
           if (PS.debugCount < 2) { PS.debugCount++; console.log('نمونه متن صفحه سرچ:', txt.slice(0, 250).replace(/\n/g, ' | ')); }
           if (!found) { finish({ kw, found, n: cards, via: 'ui' }); return; }
-          // کوچک‌ترین بلوکی که کد را دارد = کارت اولین محصول؛ لینک داخلش = صفحه محصول
+          // کوچک‌ترین بلوکی که کد را دارد = کارت اولین محصول؛ مثل کاربر رویش کلیک کن
           const blocks = Array.from(doc.querySelectorAll('*'))
             .filter(el => el.children.length < 40 && (el.innerText || '').includes(pk) && (el.innerText || '').length < 900)
             .sort((a, b) => a.innerText.length - b.innerText.length);
-          const anchor = blocks.length ? blocks[0].querySelector('a[href]') : null;
-          if (!anchor) { finish({ kw, found, n: cards, via: 'ui', error: 'no-link' }); return; }
-          const url = anchor.href;
-          const p = document.createElement('iframe');
-          p.style.cssText = 'position:fixed;right:-2000px;width:10px;height:10px;opacity:0;border:0';
-          let done2 = false;
-          const to2 = setTimeout(() => fin2({}), 25000);
+          const card = blocks[0];
+          if (!card) { finish({ kw, found, n: cards, via: 'ui', error: 'no-card' }); return; }
+          const target = card.querySelector('a[href]') || card.querySelector('[ng-click]') ||
+                         card.closest('[ng-click]') || card;
+          const how = target.tagName === 'A' ? 'link:' + target.getAttribute('href')
+                    : (target.hasAttribute && target.hasAttribute('ng-click') ? 'ng-click' : 'card-click');
+          if (PS.debugCount < 4) console.log('کلیک روی:', how);
+          let baseLoc = '';
+          try { baseLoc = doc.location.pathname + doc.location.hash; } catch (e) {}
+          const p = f;   // خودِ iframe سرچ را ناوبری می‌کنیم
+          let done2 = false, polls = 0;
+          const to2 = setTimeout(() => fin2({ error: 'no-nav' }), 30000);
           function fin2(extra) {
             if (done2) return; done2 = true;
-            clearTimeout(to2); try { p.remove(); } catch (e) {}
-            finish(Object.assign({ kw, found, n: cards, via: 'ui', url }, extra));
+            clearTimeout(to2);
+            finish(Object.assign({ kw, found, n: cards, via: 'ui', click: how }, extra));
           }
-          p.onload = () => setTimeout(() => {
+          function parseProduct() {
             try {
               const pd = p.contentDocument;
               const ptxt = (pd && pd.body && pd.body.innerText) || '';
@@ -213,11 +218,23 @@
               const h = pd.querySelector('h1') || pd.querySelector('h2');
               let name = h ? (h.innerText || '').trim().split('\n')[0] : '';
               if (!name) name = (pd.title || '').split('|')[0].trim();
-              fin2({ payamCode: payam, name });
+              let url = ''; try { url = pd.location.href; } catch (e) {}
+              fin2({ payamCode: payam, name, url });
             } catch (e) { fin2({ error: String(e) }); }
-          }, 1500);
-          p.src = url;
-          doc.body.appendChild(p);
+          }
+          (function poll() {
+            polls++;
+            try {
+              const pd = p.contentDocument;
+              const cur = pd.location.pathname + pd.location.hash;
+              const ptxt = (pd.body && pd.body.innerText) || '';
+              if (cur !== baseLoc || /کد پیام/.test(ptxt)) {
+                if (/کد پیام/.test(ptxt) || polls > 2) { setTimeout(parseProduct, 800); return; }
+              }
+            } catch (e) {}
+            if (polls < 40) setTimeout(poll, 400); else fin2({ error: 'no-nav' });
+          })();
+          try { target.click(); } catch (e) { fin2({ error: 'click-failed' }); }
         } catch (e) { finish({ kw, found: null, error: String(e) }); }
       }, 1500);
       f.src = '/search?keyword=' + encodeURIComponent(kw);
