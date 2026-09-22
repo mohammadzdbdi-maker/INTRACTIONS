@@ -95,6 +95,7 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function searchOne(kw) {
+    PS.refreshCaptcha();
     const headers = { 'accept': 'application/json, text/plain, */*', 'cache-control': 'no-cache', 'pragma': 'no-cache' };
     if (PS.captcha.token) { headers['captcha_token'] = PS.captcha.token; }
     if (PS.captcha.enter) { headers['captcha_user_enter'] = PS.captcha.enter; }
@@ -106,7 +107,7 @@
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         const capish = res.status === 401 || res.status === 403 ||
-                       /captcha|کپچا|امنیتی/i.test(body);
+                       /captcha|کپچا|امنیتی|تصویر وارد شده/i.test(body) || /"errorCode":216/.test(body);
         throw { captcha: capish, status: res.status, body: body.slice(0, 200) };
       }
       const j = await res.json().catch(() => null);
@@ -142,7 +143,7 @@
         if (hits.length) found++;
       } catch (e) {
         if (e && e.captcha) {
-          console.error('%c✘ سرچ رد شد (مسئله کپچا). الان یک بار دستی در خود سایت سرچ کنید تا توکن ثبت شود، سپس __psRun() را دوباره بزنید.',
+          console.error('%c✘ کپچای معتبر نداریم. یک بار دستی در خود سایت سرچ کنید (تا کپچای تازه در storage بنشیند)، سپس __psRun() را دوباره بزنید.',
                         'color:#c00;font-weight:bold');
           if (e.body) console.error('متن خطای سرور:', e.body);
           PS.stop = true;
@@ -164,21 +165,33 @@
     console.log('تمام. برای دانلود نتایج: __psExport()');
   };
   PS.stopRun = () => { PS.stop = true; };
-  PS.scanStorage = function () {
+  function absorb(k, v, verbose) {
+    let o = null;
+    try { o = JSON.parse(v); } catch (e) {}
+    if (o && typeof o === 'object') {
+      for (const [kk, vv] of Object.entries(o)) {
+        if (/token/i.test(kk) && typeof vv === 'string' && vv.length > 3) PS.captcha.token = vv;
+        else if (/enter|answer|user|code|value/i.test(kk) && vv != null) PS.captcha.enter = String(vv);
+      }
+    } else if (typeof v === 'string' && v.length > 10) {
+      if (/enter|answer|user/i.test(k)) PS.captcha.enter = v;
+      else PS.captcha.token = v;
+    }
+    if (verbose) console.log('کپچا از storage:', k, '=', String(v).slice(0, 60));
+  }
+  PS.scanStorage = function (verbose) {
     try {
       for (const st of [localStorage, sessionStorage]) {
         for (let i = 0; i < st.length; i++) {
           const k = st.key(i), v = st.getItem(k) || '';
-          if (/captcha/i.test(k)) {
-            if (/token/i.test(k) && v.length > 20) PS.captcha.token = v;
-            else if (/enter|answer|user/i.test(k)) PS.captcha.enter = v;
-            console.log('کپچا از storage:', k, '=', v.slice(0, 40));
-          }
+          if (/captcha/i.test(k)) absorb(k, v, verbose);
         }
       }
     } catch (e) {}
     return PS.captcha;
   };
+  // قبل از هر درخواست، کپچای تازه را از storage بخوان (اپ بعد از هر سرچ آن را نو می‌کند)
+  PS.refreshCaptcha = function () { return PS.scanStorage(false); };
   PS.showCaptcha = () => (console.log('کپچای فعلی:', PS.captcha), PS.captcha);
   PS.report = function () {
     const all = Object.values(PS.results);
