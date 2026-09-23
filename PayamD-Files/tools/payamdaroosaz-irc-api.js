@@ -604,9 +604,32 @@
     }, Promise.resolve()).then(function () { log('PROBE2 DONE — خروجی را بفرستید'); });
   };
 
+
+  window.__psaProbeAll3 = function () {
+    var tries = [
+      ['ژنریک تنها', '03016', 100],
+      ['ژنریک + فرم (فاصله)', '03016 قرص', 100],
+      ['فرم + ژنریک', 'قرص 03016', 100],
+      ['ژنریک + عدد دوز', '03016 150', 100],
+      ['نام تک‌کلمه', 'پیگمادرم', 100],
+      ['نام دوکلمه AND?', 'پیگمادرم کپسول', 100]
+    ];
+    tries.reduce(function (pr, t) {
+      return pr.then(function () {
+        return catFetch(t[1], 1, t[2]).then(function (r) {
+          var j = r.json;
+          var items = (j && j.items) || [];
+          var f0 = items[0] || {};
+          log('PROBE3 [' + t[0] + '] kw=' + t[1] + ' status=' + r.status + ' total=' + (j && j.total != null ? j.total : '-') +
+              ' items=' + items.length + ' firstCode=' + (f0.payamCode || '') + ' firstFa=' + String(f0.fullNameFa || '').slice(0, 40));
+        }).then(function () { return catSleep(700); });
+      });
+    }, Promise.resolve()).then(function () { log('PROBE3 DONE — خروجی را بفرستید'); });
+  };
+
   var CAT_CAP = 100;
   window.__psaRunCatalog = function (rootLen, pageSize) {
-    rootLen = rootLen || 4;
+    rootLen = rootLen || 1;
     pageSize = pageSize || 100;
     if (PSA.running) { log('یک حلقه در حال اجراست؛ اول __psaStop()'); return; }
     PSA.running = true; PSA.stopReq = false;
@@ -645,16 +668,16 @@
       function rebuild() {
         var q = [], seen = {};
         function push(p) { if (!done[p] && !seen[p]) { seen[p] = 1; q.push(p); } }
-        var roots = Math.pow(10, rootLen - 1);
-        for (var i = 0; i < roots; i++) push('0' + ('000000000' + i).slice(-(rootLen - 1)));
+        var roots = Math.pow(10, rootLen);
+        for (var i = 0; i < roots; i++) push(('000000000' + i).slice(-rootLen));
         Object.keys(done).forEach(function (k) {
-          if (done[k].n >= CAT_CAP && k.length < 10) for (var d = 0; d <= 9; d++) push(k + d);
+          if (done[k].n >= CAT_CAP && k.length < 5) for (var d = 0; d <= 9; d++) push(k + d);
         });
         return q;
       }
       var queue = rebuild();
       var catCount = arr.reduce(function (a, n) { return a + (n.c || 0); }, 0);
-      log('CATALOG شروع: ریشه ' + rootLen + ' رقمی | گرههای مانده: ' + queue.length + ' | تمام‌شده: ' + arr.length + ' | pageSize=' + size);
+      log('CATALOG شروع: ریشهٔ ' + rootLen + ' رقمی (فضای کد ژنریک، عمق تا ۵) | گرههای مانده: ' + queue.length + ' | تمام‌شده: ' + arr.length + ' | pageSize=' + size);
       var qidx = 0;
 
       function doPage(p, pg) {
@@ -697,7 +720,7 @@
             st.nodes++; catCount += c;
             qDirty.push({ k: p, n: total, c: c });
             done[p] = { k: p, n: total, c: c };
-            if (total >= CAT_CAP && p.length >= 10) { st.stuck++; log('CATALOG: گره ' + p + ' روی سقف گیر کرد'); }
+            if (total >= CAT_CAP && p.length >= 5) { st.stuck++; log('CATALOG: ژنریک ' + p + ' روی سقف ۱۰۰ گیر کرد (بررسی دستی بعدی)'); }
             if (st.nodes % 25 === 0 || queue.length - qidx < 5) {
               log('CATALOG: گره ' + st.nodes + ' | صف مانده ' + (queue.length - qidx) + ' | رکورد جمع‌شده ~' + catCount + ' | حذف ' + st.dropped + ' | خطا ' + st.errs);
             }
