@@ -52,7 +52,7 @@
   function db() {
     if (DBP) return DBP;
     DBP = new Promise(function (res, rej) {
-      var rq = indexedDB.open('psa_db', 7);
+      var rq = indexedDB.open('psa_db', 8);
       rq.onupgradeneeded = function () {
         var d = rq.result;
         if (!d.objectStoreNames.contains('irc')) d.createObjectStore('irc', { keyPath: 'k' });
@@ -63,6 +63,8 @@
         if (!d.objectStoreNames.contains('suppname2')) d.createObjectStore('suppname2', { keyPath: 'k' });
         if (!d.objectStoreNames.contains('suppname3')) d.createObjectStore('suppname3', { keyPath: 'k' });
         if (!d.objectStoreNames.contains('suppname4')) d.createObjectStore('suppname4', { keyPath: 'k' });
+        if (!d.objectStoreNames.contains('catalog')) d.createObjectStore('catalog', { keyPath: 'k' });
+        if (!d.objectStoreNames.contains('catq')) d.createObjectStore('catq', { keyPath: 'k' });
       };
       rq.onsuccess = function () { res(rq.result); };
       rq.onerror = function () { rej(rq.error); };
@@ -357,12 +359,13 @@
 
   window.__psaStop = function () { PSA.stopReq = true; log('درخواست توقف؛ چند ثانیه…'); };
   window.__psaStatus = function () {
-    Promise.all([countStore('irc'), countStore('gen'), countStore('price'), countStore('supp')]).then(function (c) {
+    Promise.all([countStore('irc'), countStore('gen'), countStore('price'), countStore('supp'), countStore('catalog'), countStore('catq')]).then(function (c) {
       log('IRC ذخیره‌شده: ' + c[0] + (PSA.ircs ? '/' + PSA.ircs.length : '/?') +
           ' | مکمل ذخیره‌شده: ' + c[3] + (PSA.supp ? '/' + PSA.supp.length : '/?') +
           ' | ژنریک ذخیره‌شده: ' + c[1] + '/' + GEN1704.length +
           ' | قیمت ذخیره‌شده: ' + c[2] + (PSA.codes ? '/' + PSA.codes.length : '/?') +
-          ' | در حال اجرا: ' + (PSA.running ? 'بله ' + JSON.stringify(PSA.stats) : 'خیر'));
+          ' | کاتالوگ: ' + c[4] + ' محصول، ' + c[5] + ' گره' +
+          ' | در حال اجرا: ' + (PSA.running ? 'بله' : 'خیر'));
     });
   };
   window.__psaResetIRC = function () { PSA.mem.irc = null; clearStore('irc').then(function () { log('استور irc پاک شد'); }); };
@@ -555,6 +558,201 @@
       });
     }, Promise.resolve()).then(function () { log('PROBE ALL DONE — خروجی را بفرستید'); });
   };
+
+  /* ---------------- کاتالوگ کامل: پروب۲ + خزشگر پیشوند کد پیام ---------------- */
+  function catFetch(kw, page, size) {
+    var tok = authTok();
+    if (!tok) return Promise.resolve({ status: 401, json: null, text: 'NO_TOKEN' });
+    var url = '/api/v3/frontOffice/products?keyword=' + encodeURIComponent(kw) + '&page=' + page + '&pageSize=' + size;
+    return fetch(url, { headers: { 'accept': 'application/json', 'Authorization': 'Bearer ' + tok } })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j = null; try { j = JSON.parse(t); } catch (e) {}
+          return { status: r.status, json: j, text: t };
+        });
+      })
+      .catch(function (e) { return { status: 0, json: null, text: String(e) }; });
+  }
+  function catSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  window.__psaProbeAll2 = function () {
+    var tries = [
+      ['کد کامل پیگمادرم', '0301010272', 10],
+      ['کد کامل لانتوس', '0100010466', 10],
+      ['کد چرند (کنترل)', '99999999', 10],
+      ['GTIN پیگمادرم', '6260661805558', 10],
+      ['پیشوند ۸ رقمی', '03010102', 10],
+      ['پیشوند ۶ رقمی', '030101', 10],
+      ['پیشوند ۴ رقمی', '0301', 10],
+      ['پیشوند ۲ رقمی', '03', 10],
+      ['پیشوند ۴ رقمی pageSize=100', '0301', 100],
+      ['keyword=0 pageSize=100', '0', 100]
+    ];
+    tries.reduce(function (pr, t) {
+      return pr.then(function () {
+        return catFetch(t[1], 1, t[2]).then(function (r) {
+          var j = r.json;
+          var total = j && j.total != null ? j.total : '-';
+          var items = (j && j.items) || [];
+          var f0 = items[0] || {};
+          var hit = String(f0.payamCode || '').indexOf(t[1]) >= 0 || String(f0.irc || '').indexOf(t[1]) >= 0;
+          log('PROBE2 [' + t[0] + '] kw=' + t[1] + ' size=' + t[2] + ' status=' + r.status + ' total=' + total +
+              ' items=' + items.length + ' firstCode=' + (f0.payamCode || '') + ' firstFa=' + String(f0.fullNameFa || '').slice(0, 40) +
+              ' codeHasKw=' + (hit ? 'YES' : 'no') + (!j && isWafText(r.text) ? ' (WAF!)' : ''));
+        }).then(function () { return catSleep(700); });
+      });
+    }, Promise.resolve()).then(function () { log('PROBE2 DONE — خروجی را بفرستید'); });
+  };
+
+  var CAT_CAP = 100;
+  window.__psaRunCatalog = function (rootLen, pageSize) {
+    rootLen = rootLen || 4;
+    pageSize = pageSize || 100;
+    if (PSA.running) { log('یک حلقه در حال اجراست؛ اول __psaStop()'); return; }
+    PSA.running = true; PSA.stopReq = false;
+    PSA.catRootLen = rootLen;
+    var size = pageSize;
+    var st = { nodes: 0, dropped: 0, errs: 0, strikes: 0, stuck: 0 };
+    var catDirty = [], qDirty = [];
+
+    function okItem(i, p) {
+      return String(i.payamCode || '').indexOf(p) >= 0 || String(i.irc || '').indexOf(p) >= 0 || String(i.genericCode5 || '').indexOf(p) >= 0;
+    }
+    function flushCat() {
+      var b = catDirty.splice(0, catDirty.length);
+      var q = qDirty.splice(0, qDirty.length);
+      return putMany('catalog', b).then(function () { return putMany('catq', q); })
+        .catch(function (e) { log('هشدار ذخیره: ' + e); });
+    }
+    function collect(items, p) {
+      var out = [];
+      (items || []).forEach(function (i) {
+        if (!okItem(i, p)) { st.dropped++; return; }
+        var lp = i.latestPrice || null;
+        out.push({
+          k: 'c' + (i.payamCode || '') + '|' + (i.id || i.irc || ''),
+          p: i.payamCode || '', f: (i.fullNameFa || '').trim(), e: (i.fullNameEn || '').trim(),
+          g: i.genericCode5 || '', ic: i.irc || '', ig: i.isGeneric ? 1 : 0,
+          pr: (lp && lp.price != null) ? lp.price : '', ut: lp ? (lp.updateTime || '') : ''
+        });
+      });
+      catDirty.push.apply(catDirty, out);
+      return out.length;
+    }
+
+    getAll('catq').then(function (arr) {
+      var done = {}; arr.forEach(function (n) { done[n.k] = n; });
+      function rebuild() {
+        var q = [], seen = {};
+        function push(p) { if (!done[p] && !seen[p]) { seen[p] = 1; q.push(p); } }
+        var roots = Math.pow(10, rootLen - 1);
+        for (var i = 0; i < roots; i++) push('0' + ('000000000' + i).slice(-(rootLen - 1)));
+        Object.keys(done).forEach(function (k) {
+          if (done[k].n >= CAT_CAP && k.length < 10) for (var d = 0; d <= 9; d++) push(k + d);
+        });
+        return q;
+      }
+      var queue = rebuild();
+      var catCount = arr.reduce(function (a, n) { return a + (n.c || 0); }, 0);
+      log('CATALOG شروع: ریشه ' + rootLen + ' رقمی | گرههای مانده: ' + queue.length + ' | تمام‌شده: ' + arr.length + ' | pageSize=' + size);
+      var qidx = 0;
+
+      function doPage(p, pg) {
+        return catFetch(p, pg, size).then(function (r) {
+          if (r.status !== 200 || !r.json) {
+            if (size > 10 && (r.status === 400 || r.status === 422)) {
+              log('CATALOG: pageSize=' + size + ' رد شد؛ کاهش به ۱۰');
+              size = 10;
+              return doPage(p, pg);
+            }
+            st.errs++; st.strikes++;
+            if (st.strikes >= MAX_STRIKES) return 'FATAL';
+            if (r.status === 429 || isWafText(r.text)) return catSleep(BACKOFF_MS).then(function () { return doPage(p, pg); });
+            return catSleep(2000).then(function () { return doPage(p, pg); });
+          }
+          st.strikes = 0;
+          return r.json;
+        });
+      }
+
+      function doNode(p) {
+        return doPage(p, 1).then(function (j) {
+          if (j === 'FATAL') return 'FATAL';
+          if (!j) return null;
+          var total = j.total || 0;
+          var c = collect(j.items, p);
+          var pages = Math.min(Math.ceil(Math.min(total, CAT_CAP) / size), Math.ceil(CAT_CAP / size));
+          var chain = Promise.resolve();
+          for (var pg = 2; pg <= pages; pg++) {
+            chain = chain.then(function (pg2) {
+              return function () {
+                if (PSA.stopReq) return Promise.resolve();
+                return catSleep(GAP_MS).then(function () { return doPage(p, pg2); }).then(function (j2) {
+                  if (j2 && j2 !== 'FATAL') c += collect(j2.items, p);
+                });
+              };
+            }(pg));
+          }
+          return chain.then(function () {
+            st.nodes++; catCount += c;
+            qDirty.push({ k: p, n: total, c: c });
+            done[p] = { k: p, n: total, c: c };
+            if (total >= CAT_CAP && p.length >= 10) { st.stuck++; log('CATALOG: گره ' + p + ' روی سقف گیر کرد'); }
+            if (st.nodes % 25 === 0 || queue.length - qidx < 5) {
+              log('CATALOG: گره ' + st.nodes + ' | صف مانده ' + (queue.length - qidx) + ' | رکورد جمع‌شده ~' + catCount + ' | حذف ' + st.dropped + ' | خطا ' + st.errs);
+            }
+            if (catDirty.length > 200) return flushCat();
+            return null;
+          });
+        });
+      }
+
+      function worker() {
+        return (function next() {
+          if (PSA.stopReq) return Promise.resolve('STOP');
+          var my = qidx++;
+          if (my >= queue.length) return Promise.resolve();
+          return catSleep(GAP_MS).then(function () { return doNode(queue[my]); }).then(function (r) {
+            if (r === 'FATAL') return 'STOP';
+            return next();
+          });
+        })();
+      }
+      function phase() {
+        var workers = [];
+        for (var w = 0; w < CONC; w++) workers.push(worker());
+        return Promise.all(workers).then(function () {
+          return flushCat().then(function () {
+            if (PSA.stopReq || st.strikes >= MAX_STRIKES) return false;
+            var nq = rebuild();
+            if (!nq.length) return false;
+            log('CATALOG: فاز بعد — ' + nq.length + ' گره جدید (بچههای سقف‌خورده)');
+            queue = nq; qidx = 0;
+            return true;
+          });
+        });
+      }
+      (function loop() {
+        phase().then(function (again) {
+          if (again && !PSA.stopReq) { loop(); return; }
+          PSA.running = false;
+          var left = rebuild().length;
+          log('CATALOG پایان: گره ' + st.nodes + ' | خطا ' + st.errs + ' | حذف غیرمرتبط ' + st.dropped + ' | مانده ' + left +
+              (left && PSA.stopReq ? ' (توقف درخواستی — ادامه: همان فرمان)' : '') +
+              ' | وضعیت: __psaStatus() | خروجی: __psaExportCatalog()');
+        });
+      })();
+    });
+  };
+
+  window.__psaExportCatalog = function () {
+    getAll('catalog').then(function (arr) {
+      var rows = [['کد پیام', 'IRC', 'کد ژنریک', 'نام فارسی', 'نام انگلیسی', 'isGeneric', 'قیمت واحد (ریال)', 'تاریخ قیمت (میلادی)']];
+      arr.forEach(function (r) { rows.push([r.p, r.ic, r.g, r.f, r.e, r.ig ? '1' : '', r.pr == null ? '' : r.pr, r.ut || '']); });
+      csvDownload('payam_catalog.csv', rows);
+      log('CATALOG EXPORT: ' + arr.length + ' رکورد');
+    });
+  };
   /* ---------------- پاس نام ۴: کلمهٔ دوم انتخابی (برای صفرها و ابهام‌های پاس ۱ و ۳) ---------------- */
   function ensurePairs3(cb) {
     if (PSA.pairs4) { cb(PSA.pairs4); return; }
@@ -585,7 +783,7 @@
       });
     });
   };
-  log('موتور API نسخه ۷ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaExportSuppName4() | __psaStatus() | __psaStop()');
+  log('موتور API نسخه ۸ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaProbeAll2() | __psaRunCatalog(4,100) | __psaExportCatalog() | __psaStatus() | __psaStop()');
   migrate();
   ensureList(function () {});
 })();
