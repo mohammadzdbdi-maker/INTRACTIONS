@@ -806,7 +806,7 @@
       });
     });
   };
-  log('موتور API نسخه ۸ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaProbeAll2() | __psaRunCatalog(4,100) | __psaExportCatalog() | __psaStatus() | __psaStop()');
+  log('موتور API نسخه ۹ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaProbeAll2() | __psaRunCatalog(1,100) | __psaExportCatalog() | __psaStatus() | __psaStop()');
   migrate();
   ensureList(function () {});
 })();
