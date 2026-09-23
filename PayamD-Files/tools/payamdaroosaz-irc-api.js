@@ -768,6 +768,61 @@
     });
   };
 
+
+  /* ---------------- شکافت ژنریک‌های سقف‌خورده با توکن AND ---------------- */
+  window.__psaRunCatalogStuck = function () {
+    var gens = ['02101', '02100', '02714', '08000', '01307'];
+    var toks = ['قرص', 'کپسول', 'شربت', 'پودر', 'قطره', 'کرم', 'ژل', 'اسپری', 'شامپو', 'صابون',
+      'محلول', 'سوسپانسیون', 'امولسیون', 'پماد', 'شیاف', 'عدد', 'میلی', 'گرم', 'لیتر', 'واحد',
+      'بسته', 'ساشه', 'آمپول', 'ویال', 'کف', 'جوشان', 'جویدنی', 'نرم', 'مایع', 'اشک', 'چشم',
+      'tablet', 'capsule', 'mg', 'ml', 'gr', '1000', '500', '250', '100', '60', '30', '20', '10'];
+    if (PSA.running) { log('یک حلقه در حال اجراست؛ اول __psaStop()'); return; }
+    PSA.running = true; PSA.stopReq = false;
+    var queue = [];
+    gens.forEach(function (g) { toks.forEach(function (t) { queue.push([g, t]); }); });
+    var qi = 0, got = 0, nodes = 0, dirty = [];
+    log('STUCK-SPLIT شروع: ' + queue.length + ' پرسش (۵ ژنریک × ' + toks.length + ' توکن)');
+    function worker() {
+      return (function next() {
+        if (PSA.stopReq) return Promise.resolve();
+        var my = qi++;
+        if (my >= queue.length) return Promise.resolve();
+        var g = queue[my][0], t = queue[my][1];
+        return catSleep(GAP_MS).then(function () { return catFetch(g + ' ' + t, 1, 100); }).then(function (r) {
+          if (r.status === 200 && r.json) {
+            nodes++;
+            var items = r.json.items || [];
+            items.forEach(function (i) {
+              var lp = i.latestPrice || null;
+              dirty.push({
+                k: 'c' + (i.payamCode || '') + '|' + (i.id || i.irc || ''),
+                p: i.payamCode || '', f: (i.fullNameFa || '').trim(), e: (i.fullNameEn || '').trim(),
+                g: i.genericCode5 || '', ic: i.irc || '', ig: i.isGeneric ? 1 : 0,
+                pr: (lp && lp.price != null) ? lp.price : '', ut: lp ? (lp.updateTime || '') : ''
+              });
+              got++;
+            });
+            if (dirty.length > 200) { var b = dirty.splice(0, dirty.length); putMany('catalog', b); }
+          } else if (r.status === 429 || isWafText(r.text)) {
+            return catSleep(BACKOFF_MS).then(function () { qi--; return next(); });
+          }
+          if (nodes % 25 === 0) log('STUCK-SPLIT: ' + nodes + '/' + queue.length + ' پرسش | ' + got + ' رکورد');
+          return next();
+        });
+      })();
+    }
+    var ws = [];
+    for (var w = 0; w < CONC; w++) ws.push(worker());
+    Promise.all(ws).then(function () {
+      if (dirty.length) { var b = dirty.splice(0, dirty.length); return putMany('catalog', b); }
+    }).then(function () {
+      PSA.running = false;
+      countStore('catalog').then(function (n) {
+        log('STUCK-SPLIT پایان: ' + nodes + ' پرسش، ' + got + ' رکورد (تکراری‌ها ادغام) | کاتالوگ کل: ' + n + ' | خروجی: __psaExportCatalog()');
+      });
+    });
+  };
+
   window.__psaExportCatalog = function () {
     getAll('catalog').then(function (arr) {
       var rows = [['کد پیام', 'IRC', 'کد ژنریک', 'نام فارسی', 'نام انگلیسی', 'isGeneric', 'قیمت واحد (ریال)', 'تاریخ قیمت (میلادی)']];
@@ -806,7 +861,7 @@
       });
     });
   };
-  log('موتور API نسخه ۹ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaProbeAll2() | __psaRunCatalog(1,100) | __psaExportCatalog() | __psaStatus() | __psaStop()');
+  log('موتور API نسخه ۱۰ (IndexedDB) آماده است. فرمان‌ها: __psaRunIRC() | __psaRunSupp() | __psaRunGen() | __psaRunPrice() | __psaRunSuppName4() | __psaProbeAll2() | __psaRunCatalog(1,100) | __psaRunCatalogStuck() | __psaExportCatalog() | __psaStatus() | __psaStop()');
   migrate();
   ensureList(function () {});
 })();
