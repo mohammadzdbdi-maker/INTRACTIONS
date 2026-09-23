@@ -523,6 +523,38 @@
       });
     });
   };
+
+  /* ---------------- پروب: آیا لیست کامل بدون کلمه کلید ممکن است؟ ---------------- */
+  window.__psaProbeAll = function () {
+    var tok = authTok();
+    if (!tok) { log('توکن محلی نیست؛ اول وارد سایت شوید'); return; }
+    var tries = [
+      ['بدون پارامتر keyword', '/api/v3/frontOffice/products?page=1&pageSize=10'],
+      ['keyword خالی', '/api/v3/frontOffice/products?keyword=&page=1&pageSize=10'],
+      ['keyword=%20 (فاصله)', '/api/v3/frontOffice/products?keyword=%20&page=1&pageSize=10'],
+      ['pageSize=50 بدون keyword', '/api/v3/frontOffice/products?page=1&pageSize=50'],
+      ['pageSize=100 بدون keyword', '/api/v3/frontOffice/products?page=1&pageSize=100'],
+      ['page=2 بدون keyword', '/api/v3/frontOffice/products?page=2&pageSize=10'],
+      ['keyword=0', '/api/v3/frontOffice/products?keyword=0&page=1&pageSize=10'],
+      ['keyword=آ', '/api/v3/frontOffice/products?keyword=' + encodeURIComponent('آ') + '&page=1&pageSize=10']
+    ];
+    tries.reduce(function (pr, t) {
+      return pr.then(function () {
+        return fetch(t[1], { headers: { 'accept': 'application/json', 'Authorization': 'Bearer ' + tok } })
+          .then(function (r) { return r.text().then(function (x) { return { st: r.status, x: x }; }); })
+          .then(function (res) {
+            var j = null; try { j = JSON.parse(res.x); } catch (e) {}
+            var total = j && (j.total != null) ? j.total : '-';
+            var cnt = j && j.items ? j.items.length : '-';
+            var first = (j && j.items && j.items[0]) ? (j.items[0].fullNameFa || j.items[0].payamCode || '') : '';
+            var waf = !j && isWafText(res.x) ? ' (WAF/HTML!)' : '';
+            log('PROBE [' + t[0] + '] status=' + res.st + ' total=' + total + ' items=' + cnt + ' first=' + String(first).slice(0, 50) + waf);
+          })
+          .catch(function (e) { log('PROBE [' + t[0] + '] ERR ' + e); })
+          .then(function () { return new Promise(function (r2) { setTimeout(r2, 600); }); });
+      });
+    }, Promise.resolve()).then(function () { log('PROBE ALL DONE — خروجی را بفرستید'); });
+  };
   /* ---------------- پاس نام ۴: کلمهٔ دوم انتخابی (برای صفرها و ابهام‌های پاس ۱ و ۳) ---------------- */
   function ensurePairs3(cb) {
     if (PSA.pairs4) { cb(PSA.pairs4); return; }
